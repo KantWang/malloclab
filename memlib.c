@@ -15,23 +15,20 @@
 #include "config.h"
 
 /* private variables */
-static char *mem_start_brk;  /* points to first byte of heap */
-static char *mem_brk;        /* points to last byte of heap */
-static char *mem_max_addr;   /* largest legal heap address */ 
+static char *mem_start_brk;  /* 힙의 맨 앞 byte의 주소 */
+static char *mem_brk;        /* 사용 중인 힙의 마지막 byte 주소 + 1 */
+static char *mem_max_addr;   /* 힙의 맨 끝 byte의 주소 */ 
 
-/* 
- * mem_init - initialize the memory system model
- */
 void mem_init(void)
 {
-    /* allocate the storage we will use to model the available VM */
+    /* mem_start_brk에는 최대 힙 사이즈 만큼 확보한 공간의 header 주소를 저장 */
     if ((mem_start_brk = (char *)malloc(MAX_HEAP)) == NULL) {
 	fprintf(stderr, "mem_init_vm: malloc error\n");
 	exit(1);
     }
 
-    mem_max_addr = mem_start_brk + MAX_HEAP;  /* max legal heap address */
-    mem_brk = mem_start_brk;                  /* heap is empty initially */
+    mem_max_addr = mem_start_brk + MAX_HEAP;  /* 힙의 맨 끝 byte의 주소 */
+    mem_brk = mem_start_brk;                  /* 힙의 맨 앞 byte의 주소. 이후에 header + 1 위치로 옮겨주겠지? */
 }
 
 /* 
@@ -50,22 +47,23 @@ void mem_reset_brk()
     mem_brk = mem_start_brk;
 }
 
-/* 
- * mem_sbrk - simple model of the sbrk function. Extends the heap 
- *    by incr bytes and returns the start address of the new area. In
- *    this model, the heap cannot be shrunk.
- */
+/*  */
 void *mem_sbrk(int incr) 
 {
-    char *old_brk = mem_brk;
+    // 최초의 mem_brk 값은 힙의 맨 앞 byte의 주소
+    char *old_brk = mem_brk; 
 
     if ( (incr < 0) || ((mem_brk + incr) > mem_max_addr)) {
 	errno = ENOMEM;
 	fprintf(stderr, "ERROR: mem_sbrk failed. Ran out of memory...\n");
 	return (void *)-1;
     }
-    mem_brk += incr;
-    return (void *)old_brk;
+
+    // mm_init 함수에서 inplicit: 4*WSIZE, explicit: 6*WSIZE가 매개변수로 들어온다
+    // inplicit의 경우, 미사용 패딩 | header | footer | prologue header 4칸 할당
+    // mem_brk의 위치는 prologue header 주소 + 1
+    mem_brk += incr; 
+    return (void *)old_brk; // 최초 return 되는 값은 힙의 맨 앞 byte의 주소
 }
 
 /*

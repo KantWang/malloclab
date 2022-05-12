@@ -243,3 +243,14 @@ void* mm_realloc(void* bp, size_t size)
 	mm_free(old_dp); // 기존 메모리는 free
 	return new_dp; // 새로운 주소 return
 }
+
+
+
+
+
+
+
+
+
+
+

@@ -36,11 +36,11 @@ team_t team = {
 };
 
 /* Basic constants and macros */
-#define WSIZE 4              /* Word and header/footer size (bytes) */
-#define DSIZE 8              /* Double word size (bytes) */
-#define CHUNKSIZE (1<<12)    /* Extend heap by this amount (bytes) */
+#define WSIZE 4             /* Word and header/footer size (bytes) */
+#define DSIZE 8             /* Double word size (bytes) */
+#define CHUNKSIZE (1<<12)   /* Extend heap by this amount (bytes) */
 
-#define MAX(x, y)       ((x) > (y)? (x) : (y))
+#define MAX(x, y) ((x) > (y)? (x) : (y))
 
 /* Pack a size and allocated bit into a word */
 #define PACK(size, alloc) ((size) | (alloc))
@@ -63,6 +63,7 @@ team_t team = {
 
 /* The only global variable is a pointer to the first block */
 static void* heap_listp;
+static char* last_bp; // next_fit에 사용될 ptr
 static void* extend_heap(size_t words);
 static void* coalesce(void* bp);
 static void* find_fit(size_t adjust_size);
@@ -72,7 +73,6 @@ int mm_init(void);
 
 /* bp는 현재 블록의 header + 1을 가리킨다 */
 /* heap_listp는 prologue header + 1을 가리킨다 */
-
 int mm_init(void)
 {
     /* Create the initial empty heap */
@@ -88,6 +88,7 @@ int mm_init(void)
     if (extend_heap(CHUNKSIZE / WSIZE) == NULL) // CHUNKSIZE / WSIZE 칸 만큼 힙을 늘린다
         return -1; 
 
+    last_bp = (char*)heap_listp; // void*형 heap_listp char*로 형변환
     return 0;
 }
 
@@ -107,7 +108,7 @@ static void* extend_heap(size_t words) // 힙을 words * WSIZE byte만큼 확장
     // bp에는 기존 힙의 우측 끝 주소 값이 저장됨
     if ((long)(bp = mem_sbrk(size)) == -1) 
         return NULL;
-    
+
     PUT(HDRP(bp), PACK(size, 0)); // header에 PACK(size, 0) 저장
     PUT(FTRP(bp), PACK(size, 0)); // footer에 PACK(size, 0) 저장
     PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1)); // epilogue header에 PACK(0, 1) 저장
@@ -131,6 +132,7 @@ static void *coalesce(void* bp)
     
     // case1. 양쪽 모두 할당된 경우
     if (prev_alloc && next_alloc) {
+        last_bp = bp;
         return bp;
     }
     // case2. 다음 블록이 free인 경우
@@ -155,21 +157,35 @@ static void *coalesce(void* bp)
         PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
         bp = PREV_BLKP(bp); // bp를 앞 블록의 header+1로 이동
     }
+    last_bp = bp;
     return bp; // 최종 free 블록의 header+1 리턴
 }
 
-/* first fit 방식으로 검색 */
-static void *find_fit(size_t adjust_size){
-    void *bp;
-    
-    for (bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)){ 
-        // prologue header + 1에서 epilogue header까지
-        if (!GET_ALLOC(HDRP(bp)) && (adjust_size<=GET_SIZE(HDRP(bp)))){ // 가용 블록이고 size가 충분하다면
+/* next fit 방식으로 검색 */
+static void *find_fit(size_t adjust_size){ 
+    void *bp = last_bp; // 가장 최근에 할당 된 주소 last_bp
+
+    // 최근 할당 블록 다음 블록부터 끝까지 검색
+    for (bp = NEXT_BLKP(bp); GET_SIZE(HDRP(bp)) != 0; bp = NEXT_BLKP(bp)) {
+        // 비어있고 해당 블록 사이즈가 충분할 경우
+        if (!GET_ALLOC(HDRP(bp)) && GET_SIZE(HDRP(bp)) >= adjust_size) {
+            last_bp = bp; // 가장 최근 할당된 주소를 bp로 업데이트
             return bp; // bp에 할당해 줘!
         }
     }
+    
+    // 최근 할당 블록 다음 블록부터 끝까지 검색에 실패하면 맨 앞부터 검색
+    bp = heap_listp;
+    while (bp < last_bp) {
+        bp = NEXT_BLKP(bp);
+        if (!GET_ALLOC(HDRP(bp)) && GET_SIZE(HDRP(bp)) >= adjust_size) {
+            last_bp = bp;
+            return bp;
+        }
+    }
+
     // 검색에 실패할 경우
-    return NULL; // 이 경우 extend_heap
+    return NULL;
 }
 
 void *mm_malloc(size_t size)
@@ -193,6 +209,7 @@ void *mm_malloc(size_t size)
     if ((bp = find_fit(adjust_size)) != NULL) // first fit 방식으로 찾은 블록의 주소
     {
         place(bp, adjust_size);
+        last_bp = bp; // 가장 최근 할당 주소로 last_bp 업데이트
         return bp;
     }
     // 사이즈에 맞는 위치가 없는 경우, 추가적으로 힙 영역 요청 및 배치 후 할당
@@ -201,6 +218,7 @@ void *mm_malloc(size_t size)
         return NULL;
 
     place(bp, adjust_size);
+    last_bp = bp;
     return bp;
 }
 
